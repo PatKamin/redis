@@ -38,12 +38,3 @@ RUN dnf update -y && dnf install -y \
 # Install memkind
 ENV MEMKIND_URL="http://download.opensuse.org/repositories/home:/mbiesek/Fedora_31/x86_64/memkind-1.10.0-2.2.x86_64.rpm"
 RUN rpm -i --nosignature $MEMKIND_URL
-
-# Install redis from 6.0-memkind branch
-ENV REDIS_URL="https://github.com/pmem/redis/archive/6.0-memkind.tar.gz"
-ENV REDIS_SRC="/usr/src/redis"
-RUN mkdir -p $REDIS_SRC && \
-    git clone --branch 6.0-memkind --single-branch https://github.com/patkamin/redis $REDIS_SRC && \
-    make -C $REDIS_SRC MALLOC=memkind && \
-    make -C $REDIS_SRC install && \
-    rm -r $REDIS_SRC
