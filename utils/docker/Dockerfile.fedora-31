@@ -25,7 +25,7 @@
 FROM fedora:31
 
 LABEL maintainer="patryk.kaminski@intel.com"
-
+# test
 # Update the dnf cache and install basic tools
 RUN dnf update -y && dnf install -y \
     gcc \
