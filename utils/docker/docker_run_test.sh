@@ -28,11 +28,12 @@
 #
 set -e
 
-export UTILS_PREFIX=utils/docker
-
-# building and installing redis sources
-make MALLOC=memkind
-sudo make install
+# build redis
+if [ "$REDIS_ALLOCATOR" == "memkind" ]; then
+    make MALLOC=memkind -j "$(nproc --all)"
+else
+    make -j "$(nproc --all)"
+fi
 
 # run tests
 make test

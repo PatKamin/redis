@@ -32,19 +32,23 @@
 set -e
 
 DOCKER_IMAGE_NAME="$1"
-export REDIS_HOST_PATH=${REDIS_HOST_PATH:-/tmp/}
 
 if [[ ! -f "$DOCKER_IMAGE_NAME" ]]; then
     echo "Docker image "$DOCKER_IMAGE_NAME" does not exist."
     exit 1
 fi
 
-# need to be inline with Dockerfile WORKDIR
-REDIS_CONTAINER_PATH=/home/redisuser/redis/
+if [[ -z "$REDIS_HOST_PATH" ]]; then
+    echo "REDIS_HOST_PATH has to be set."
+    exit 1
+fi
 
-docker build --tag redis-6.0-fedora-31 \
+REDIS_CONTAINER_PATH=/home/redisuser/redis/
+CONTAINER_NAME=redis-6.0-fedora-31
+
+docker build --tag "$CONTAINER_NAME" \
              --file "$DOCKER_IMAGE_NAME" \
-             --build-arg http_proxy=$http_proxy \
+             --build-arg hpwdttp_proxy=$http_proxy \
              --build-arg https_proxy=$https_proxy \
              .
 
@@ -53,4 +57,7 @@ docker run --rm \
            --tty=true \
            --env http_proxy=$http_proxy \
            --env https_proxy=$https_proxy \
-           --env REDIS_CONTAINER_PATH="$REDIS_CONTAINER_PATH"
+           --env REDIS_CONTAINER_PATH="$REDIS_CONTAINER_PATH" \
+           --env REDIS_ALLOCATOR="$REDIS_ALLOCATOR" \
+           --mount type=bind,source="$REDIS_HOST_PATH",target="$REDIS_CONTAINER_PATH" \
+            "$CONTAINER_NAME" utils/docker/docker_run_test.sh

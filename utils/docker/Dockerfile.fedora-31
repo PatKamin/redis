@@ -28,29 +28,28 @@ LABEL maintainer="patryk.kaminski@intel.com"
 
 # Update the dnf cache and install basic tools
 RUN dnf update -y && dnf install -y \
+    daxctl-devel \
     gcc \
     make \
     numactl-devel \
-    daxctl-devel \
-    git \
+    tcl-devel \
+    which \
     && dnf clean all
 
 # Add user
 ENV USER redisuser
 ENV USERPASS redispass
 RUN useradd -m $USER -p `mkpasswd $USERPASS`
-#RUN gpasswd wheel -a $USER
-#RUN echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Install memkind
 ENV MEMKIND_URL="http://download.opensuse.org/repositories/home:/mbiesek/Fedora_31/x86_64/memkind-1.10.0-2.2.x86_64.rpm"
 ENV MEMKIND_DEVEL_URL="http://download.opensuse.org/repositories/home:/mbiesek/Fedora_31/x86_64/memkind-devel-1.10.0-2.2.x86_64.rpm"
 RUN rpm -i --nosignature $MEMKIND_URL && rpm -i --nosignature $MEMKIND_DEVEL_URL
 
-#WORKDIR /home/$USER/redis
+WORKDIR /home/$USER/redis
 
 # Allow user to create files in the home directory
-#RUN chown -R $USER:wheel /home/$USER
+RUN chown -R $USER:$USER /home/$USER
 
 # Change user to $USER
-#USER $USER
+USER $USER
