@@ -53,6 +53,4 @@ docker run --rm \
            --tty=true \
            --env http_proxy=$http_proxy \
            --env https_proxy=$https_proxy \
-           --env REDIS_CONTAINER_PATH="$REDIS_CONTAINER_PATH" \
-           --mount type=bind,source="$REDIS_CONTAINER_PATH",target="$REDIS_CONTAINER_PATH" \
-           redis-6.0-fedora-31 utils/docker/docker_run_test.sh
+           --env REDIS_CONTAINER_PATH="$REDIS_CONTAINER_PATH"
