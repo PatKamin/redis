@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 #  Copyright (C) 2020 Intel Corporation.
 #  All rights reserved.
@@ -21,35 +22,37 @@
 #  OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Pull base image
-FROM fedora:31
+#
+# run_local.sh - builds a container with Docker image
+# and runs docker_run_build.sh script inside it
+#
+# Parameters:
+# -name of the Docker image file
 
-LABEL maintainer="patryk.kaminski@intel.com"
+set -e
 
-# Update the dnf cache and install basic tools
-RUN dnf update -y && dnf install -y \
-    gcc \
-    make \
-    numactl-devel \
-    daxctl-devel \
-    git \
-    && dnf clean all
+DOCKER_IMAGE_NAME="$1"
+export REDIS_HOST_PATH=${REDIS_HOST_PATH:-/tmp/}
 
-# Add user
-ENV USER redisuser
-ENV USERPASS redispass
-RUN useradd -m $USER -p `mkpasswd $USERPASS`
-RUN gpasswd wheel -a $USER
-RUN echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+if [[ ! -f "$DOCKER_IMAGE_NAME" ]]; then
+    echo "Docker image "$DOCKER_IMAGE_NAME" does not exist."
+    exit 1
+fi
 
-# Install memkind
-ENV MEMKIND_URL="http://download.opensuse.org/repositories/home:/mbiesek/Fedora_31/x86_64/memkind-1.10.0-2.2.x86_64.rpm"
-RUN rpm -i --nosignature $MEMKIND_URL
+# need to be inline with Dockerfile WORKDIR
+REDIS_CONTAINER_PATH=/home/redisuser/redis/
 
-WORKDIR /home/$USER/redis
+docker build --tag redis-6.0-fedora-31 \
+             --file "$DOCKER_IMAGE_NAME" \
+             --build-arg http_proxy=$http_proxy \
+             --build-arg https_proxy=$https_proxy \
+             .
 
-# Allow user to create files in the home directory
-RUN chown -R $USER:wheel /home/$USER
-
-# Change user to $USER
-USER $USER
+docker run --rm \
+           --privileged=true \
+           --tty=true \
+           --env http_proxy=$http_proxy \
+           --env https_proxy=$https_proxy \
+           --env REDIS_CONTAINER_PATH="$REDIS_CONTAINER_PATH" \
+           --mount type=bind,source="$REDIS_CONTAINER_PATH",target="$REDIS_CONTAINER_PATH" \
+           redis-6.0-fedora-31 utils/docker/docker_run_test.sh

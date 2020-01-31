@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 #  Copyright (C) 2020 Intel Corporation.
 #  All rights reserved.
@@ -21,35 +22,17 @@
 #  OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Pull base image
-FROM fedora:31
+#
+# docker_run_build.sh - is called inside a Docker container;
+# prepares and runs redis build for specified pull request number
+#
+set -e
 
-LABEL maintainer="patryk.kaminski@intel.com"
+export UTILS_PREFIX=utils/docker
 
-# Update the dnf cache and install basic tools
-RUN dnf update -y && dnf install -y \
-    gcc \
-    make \
-    numactl-devel \
-    daxctl-devel \
-    git \
-    && dnf clean all
+# building and installing redis sources
+make MALLOC=memkind
+sudo make install
 
-# Add user
-ENV USER redisuser
-ENV USERPASS redispass
-RUN useradd -m $USER -p `mkpasswd $USERPASS`
-RUN gpasswd wheel -a $USER
-RUN echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-
-# Install memkind
-ENV MEMKIND_URL="http://download.opensuse.org/repositories/home:/mbiesek/Fedora_31/x86_64/memkind-1.10.0-2.2.x86_64.rpm"
-RUN rpm -i --nosignature $MEMKIND_URL
-
-WORKDIR /home/$USER/redis
-
-# Allow user to create files in the home directory
-RUN chown -R $USER:wheel /home/$USER
-
-# Change user to $USER
-USER $USER
+# run tests
+make test
