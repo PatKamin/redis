@@ -24,7 +24,7 @@
 
 #
 # docker_run_test.sh - is called inside a Docker container;
-# run redis tests
+# runs redis tests
 #
 set -e
 

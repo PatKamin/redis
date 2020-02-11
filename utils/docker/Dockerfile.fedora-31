@@ -44,7 +44,7 @@ RUN useradd -m $USER -p `mkpasswd $USERPASS`
 # Install memkind
 ENV MEMKIND_URL="http://download.opensuse.org/repositories/home:/mbiesek/Fedora_31/x86_64/memkind-1.10.0-2.2.x86_64.rpm"
 ENV MEMKIND_DEVEL_URL="http://download.opensuse.org/repositories/home:/mbiesek/Fedora_31/x86_64/memkind-devel-1.10.0-2.2.x86_64.rpm"
-RUN rpm -i --nosignature $MEMKIND_URL && rpm -i --nosignature $MEMKIND_DEVEL_URL
+RUN rpm -i --nosignature $MEMKIND_URL $MEMKIND_DEVEL_URL
 
 WORKDIR /home/$USER/redis
 

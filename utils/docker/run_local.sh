@@ -31,12 +31,12 @@
 
 set -e
 
-DOCKER_IMAGE_NAME="$1"
+DOCKER_IMAGE_NAME="Dockerfile.fedora-31"
 
-if [[ ! -f "$DOCKER_IMAGE_NAME" ]]; then
-    echo "Docker image "$DOCKER_IMAGE_NAME" does not exist."
-    exit 1
-fi
+#if [[ ! -f "$DOCKER_IMAGE_NAME" ]]; then
+#    echo "Docker image "$DOCKER_IMAGE_NAME" does not exist."
+#    exit 1
+#fi
 
 if [[ -z "$REDIS_HOST_PATH" ]]; then
     echo "REDIS_HOST_PATH has to be set."
