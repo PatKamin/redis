@@ -598,7 +598,9 @@ int zmalloc_get_allocator_info(size_t *allocated,
 }
 
 void set_jemalloc_bg_thread(int enable) {
-    ((void)(enable));
+    /* let jemalloc do purging asynchronously, required when there's no traffic 
+     * after flushdb */
+    enable_background_threads();
 }
 
 int jemalloc_purge() {
