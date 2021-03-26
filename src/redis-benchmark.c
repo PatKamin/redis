@@ -1506,7 +1506,7 @@ int main(int argc, const char **argv) {
     srandom(time(NULL));
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
-
+    zmalloc_create_memtier();
     config.numclients = 50;
     config.requests = 100000;
     config.liveclients = 0;
