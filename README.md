@@ -98,6 +98,10 @@ To compile against memkind, use:
 
     % make MALLOC=memkind
 
+To compile against memkind - memtier version, use:
+
+    % make MALLOC=memkind_memtier
+
 Verbose build
 -------------
 
