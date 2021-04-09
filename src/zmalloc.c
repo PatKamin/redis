@@ -86,20 +86,20 @@ void zlibc_free(void *ptr) {
 #define free_pmem(ptr) memkind_free(MEMKIND_DAX_KMEM,ptr)
 #elif defined(USE_MEMKIND_MEMTIER)
 #include <errno.h>
-static struct memtier_tier *tier_dram;
-static struct memtier_tier *tier_pmem;
-#define malloc(size) memtier_tier_malloc(tier_dram,size)
-#define calloc(count,size) memtier_tier_calloc(tier_dram,count,size)
-#define realloc_dram(ptr,size) memtier_tier_realloc(tier_dram,ptr,size)
-#define realloc_pmem(ptr,size) memtier_tier_realloc(tier_pmem,ptr,size)
-#define free_dram(ptr) memtier_tier_realloc(tier_dram,ptr,0)
-#define free_pmem(ptr) memtier_tier_realloc(tier_pmem,ptr,0)
+memkind_t dram_kind;
+memkind_t pmem_kind;
+#define malloc(size) memtier_kind_malloc(dram_kind,size)
+#define calloc(count,size) memtier_kind_calloc(dram_kind,count,size)
+#define realloc_dram(ptr,size) memtier_kind_realloc(dram_kind,ptr,size)
+#define realloc_pmem(ptr,size) memtier_kind_realloc(pmem_kind,ptr,size)
+#define free_dram(ptr) memtier_kind_realloc(dram_kind,ptr,0)
+#define free_pmem(ptr) memtier_kind_realloc(pmem_kind,ptr,0)
 #endif
 
 #if defined(USE_MEMKIND_MEMTIER)
 void zmalloc_create_memtier(void) {
-    tier_dram = memtier_tier_new(MEMKIND_DEFAULT);
-    tier_pmem = memtier_tier_new(MEMKIND_DAX_KMEM);
+    dram_kind = MEMKIND_DEFAULT;
+    pmem_kind = MEMKIND_DAX_KMEM;
 }
 #else
 void zmalloc_create_memtier(void) {
@@ -191,7 +191,11 @@ static void zmalloc_default_oom(size_t size) {
 static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 
 void *zmalloc_dram(size_t size) {
+#ifdef USE_MEMKIND_MEMTIER
+    void *ptr = memtier_kind_malloc(dram_kind, size+PREFIX_SIZE);
+#else
     void *ptr = malloc(size+PREFIX_SIZE);
+#endif
 #if defined(USE_MEMKIND) || defined(USE_MEMKIND_MEMTIER)
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #else
@@ -316,7 +320,7 @@ static void zfree_pmem(void *ptr) {
 }
 
 static void *zmalloc_pmem(size_t size) {
-    void *ptr = memtier_tier_malloc(tier_pmem, size+PREFIX_SIZE);
+    void *ptr = memtier_kind_malloc(pmem_kind, size + PREFIX_SIZE);
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
     update_zmalloc_pmem_stat_alloc(zmalloc_size(ptr));
@@ -329,7 +333,7 @@ static void *zmalloc_pmem(size_t size) {
 }
 
 static void *zcalloc_pmem(size_t size) {
-    void *ptr = memtier_tier_calloc(tier_pmem, 1, size+PREFIX_SIZE);
+    void *ptr = memtier_kind_calloc(pmem_kind, 1, size + PREFIX_SIZE);
 
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
@@ -400,6 +404,9 @@ void zfree_no_tcache(void *ptr) {
 #endif
 
 void *zcalloc_dram(size_t size) {
+#ifdef USE_MEMKIND_MEMTIER
+    void *ptr = memtier_kind_calloc(dram_kind, 1, size+PREFIX_SIZE);
+#endif
     void *ptr = calloc(1, size+PREFIX_SIZE);
 
     if (!ptr) zmalloc_oom_handler(size);
