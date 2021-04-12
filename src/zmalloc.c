@@ -86,20 +86,45 @@ void zlibc_free(void *ptr) {
 #define free_pmem(ptr) memkind_free(MEMKIND_DAX_KMEM,ptr)
 #elif defined(USE_MEMKIND_MEMTIER)
 #include <errno.h>
-memkind_t dram_kind;
-memkind_t pmem_kind;
-#define malloc(size) memtier_kind_malloc(dram_kind,size)
-#define calloc(count,size) memtier_kind_calloc(dram_kind,count,size)
-#define realloc_dram(ptr,size) memtier_kind_realloc(dram_kind,ptr,size)
-#define realloc_pmem(ptr,size) memtier_kind_realloc(pmem_kind,ptr,size)
-#define free_dram(ptr) memtier_kind_realloc(dram_kind,ptr,0)
-#define free_pmem(ptr) memtier_kind_realloc(pmem_kind,ptr,0)
+static struct memtier_memory *tiered_memory;
+static struct memtier_builder *tiered_memory_builder;
+#define malloc(size) memtier_malloc(tiered_memory, size)
+#define calloc(count, size) memtier_calloc(tiered_memory, count, size)
+#define realloc_dram(ptr, size) memtier_realloc(tiered_memory, ptr, size)
+#define realloc_pmem(ptr, size) memtier_realloc(tiered_memory, ptr, size)
+#define free_dram(ptr) memtier_realloc(tiered_memory, ptr, 0)
+#define free_pmem(ptr) memtier_realloc(tiered_memory, ptr, 0)
 #endif
 
 #if defined(USE_MEMKIND_MEMTIER)
 void zmalloc_create_memtier(void) {
-    dram_kind = MEMKIND_DEFAULT;
-    pmem_kind = MEMKIND_DAX_KMEM;
+    int ret;
+    memkind_t dram_kind = MEMKIND_DEFAULT;
+    memkind_t pmem_kind = MEMKIND_DAX_KMEM;
+
+    tiered_memory_builder = memtier_builder_new();
+    if (!tiered_memory_builder) {
+        abort();
+    }
+    ret = memtier_builder_add_tier(tiered_memory_builder, dram_kind, 1);
+    if (ret) {
+        abort();
+    }
+    ret = memtier_builder_add_tier(tiered_memory_builder, pmem_kind, 8);
+    if (ret) {
+        abort();
+    }
+    ret = memtier_builder_set_policy(tiered_memory_builder,
+                                     MEMTIER_POLICY_STATIC_THRESHOLD);
+    if (ret) {
+        abort();
+    }
+    ret = memtier_builder_construct_memtier_memory(tiered_memory_builder,
+                                                   &tiered_memory);
+    if (ret) {
+        abort();
+    }
+    memtier_builder_delete(tiered_memory_builder);
 }
 #else
 void zmalloc_create_memtier(void) {
@@ -316,28 +341,28 @@ static void zfree_pmem(void *ptr) {
 }
 
 static void *zmalloc_pmem(size_t size) {
-    void *ptr = memtier_kind_malloc(pmem_kind, size+PREFIX_SIZE);
+    void *ptr = memtier_malloc(tiered_memory, size + PREFIX_SIZE);
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
-    update_zmalloc_pmem_stat_alloc(zmalloc_size(ptr));
+    //update_zmalloc_pmem_stat_alloc(zmalloc_size(ptr));
     return ptr;
 #else
     *((size_t*)ptr) = size;
-    update_zmalloc_pmem_stat_alloc(size+PREFIX_SIZE);
+    //update_zmalloc_pmem_stat_alloc(size+PREFIX_SIZE);
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
 
 static void *zcalloc_pmem(size_t size) {
-    void *ptr = memtier_kind_calloc(pmem_kind, 1, size+PREFIX_SIZE);
+    void *ptr = memtier_calloc(tiered_memory, 1, size + PREFIX_SIZE);
 
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
-    update_zmalloc_pmem_stat_alloc(zmalloc_size(ptr));
+    //update_zmalloc_pmem_stat_alloc(zmalloc_size(ptr));
     return ptr;
 #else
     *((size_t*)ptr) = size;
-    update_zmalloc_pmem_stat_alloc(size+PREFIX_SIZE);
+    //update_zmalloc_pmem_stat_alloc(size+PREFIX_SIZE);
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
