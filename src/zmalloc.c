@@ -226,11 +226,15 @@ void *zmalloc_dram(size_t size) {
     if (!ptr) zmalloc_oom_handler(size);
 #endif
 #ifdef HAVE_MALLOC_SIZE
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(zmalloc_size(ptr));
+#endif
     return ptr;
 #else
     *((size_t*)ptr) = size;
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(size+PREFIX_SIZE);
+#endif
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
@@ -328,17 +332,13 @@ static void *zrealloc_pmem(void *ptr, size_t size) {
 static void zfree_pmem(void *ptr) {
 #ifndef HAVE_MALLOC_SIZE
     void *realptr;
-    size_t oldsize;
 #endif
 
     if (ptr == NULL) return;
 #ifdef HAVE_MALLOC_SIZE
-    update_zmalloc_pmem_stat_free(zmalloc_size(ptr));
     free_pmem(ptr);
 #else
     realptr = (char*)ptr-PREFIX_SIZE;
-    oldsize = *((size_t*)realptr);
-    update_zmalloc_pmem_stat_free(oldsize+PREFIX_SIZE);
     free_pmem(realptr);
 #endif
 }
@@ -347,11 +347,9 @@ static void *zmalloc_pmem(size_t size) {
     void *ptr = memtier_kind_malloc(pmem_kind, size + PREFIX_SIZE);
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
-    //update_zmalloc_pmem_stat_alloc(zmalloc_size(ptr));
     return ptr;
 #else
     *((size_t*)ptr) = size;
-    //update_zmalloc_pmem_stat_alloc(size+PREFIX_SIZE);
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
@@ -361,11 +359,9 @@ static void *zcalloc_pmem(size_t size) {
 
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
-    //update_zmalloc_pmem_stat_alloc(zmalloc_size(ptr));
     return ptr;
 #else
     *((size_t*)ptr) = size;
-    //update_zmalloc_pmem_stat_alloc(size+PREFIX_SIZE);
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
@@ -387,8 +383,6 @@ static void *zrealloc_pmem(void *ptr, size_t size) {
     newptr = realloc_pmem(ptr,size);
     if (!newptr) zmalloc_oom_handler(size);
 
-    update_zmalloc_pmem_stat_free(oldsize);
-    update_zmalloc_pmem_stat_alloc(zmalloc_size(newptr));
     return newptr;
 #else
     realptr = (char*)ptr-PREFIX_SIZE;
@@ -397,8 +391,6 @@ static void *zrealloc_pmem(void *ptr, size_t size) {
     if (!newptr) zmalloc_oom_handler(size);
 
     *((size_t*)newptr) = size;
-    update_zmalloc_pmem_stat_free(oldsize+PREFIX_SIZE);
-    update_zmalloc_pmem_stat_alloc(size+PREFIX_SIZE);
     return (char*)newptr+PREFIX_SIZE;
 #endif
 }
@@ -435,11 +427,15 @@ void *zcalloc_dram(size_t size) {
 
     if (!ptr) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(zmalloc_size(ptr));
+#endif
     return ptr;
 #else
     *((size_t*)ptr) = size;
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(size+PREFIX_SIZE);
+#endif
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
@@ -452,8 +448,8 @@ void *zrealloc_dram(void *ptr, size_t size) {
 #ifndef HAVE_MALLOC_SIZE
     void *realptr;
 #endif
-    size_t oldsize;
     void *newptr;
+    size_t oldsize;
 
     if (size == 0 && ptr != NULL) {
         zfree_dram(ptr);
@@ -461,22 +457,26 @@ void *zrealloc_dram(void *ptr, size_t size) {
     }
     if (ptr == NULL) return zmalloc(size);
 #ifdef HAVE_MALLOC_SIZE
-    oldsize = zmalloc_size(ptr);
     newptr = realloc_dram(ptr,size);
     if (!newptr) zmalloc_oom_handler(size);
-
+#ifndef USE_MEMKIND_MEMTIER
+    oldsize = zmalloc_size(ptr);
     update_zmalloc_dram_stat_free(oldsize);
     update_zmalloc_dram_stat_alloc(zmalloc_size(newptr));
+#endif
     return newptr;
 #else
     realptr = (char*)ptr-PREFIX_SIZE;
-    oldsize = *((size_t*)realptr);
     newptr = realloc_dram(realptr,size+PREFIX_SIZE);
     if (!newptr) zmalloc_oom_handler(size);
 
     *((size_t*)newptr) = size;
+#ifndef USE_MEMKIND_MEMTIER
+    oldsize = *((size_t*)realptr);
+
     update_zmalloc_dram_stat_free(oldsize+PREFIX_SIZE);
     update_zmalloc_dram_stat_alloc(size+PREFIX_SIZE);
+#endif
     return (char*)newptr+PREFIX_SIZE;
 #endif
 }
@@ -506,17 +506,20 @@ size_t zmalloc_usable(void *ptr) {
 void zfree_dram(void *ptr) {
 #ifndef HAVE_MALLOC_SIZE
     void *realptr;
-    size_t oldsize;
 #endif
-
     if (ptr == NULL) return;
 #ifdef HAVE_MALLOC_SIZE
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_free(zmalloc_size(ptr));
+#endif
     free_dram(ptr);
 #else
     realptr = (char*)ptr-PREFIX_SIZE;
+#ifndef USE_MEMKIND_MEMTIER
+    size_t oldsize;
     oldsize = *((size_t*)realptr);
     update_zmalloc_dram_stat_free(oldsize+PREFIX_SIZE);
+#endif
     free_dram(realptr);
 #endif
 }
@@ -538,15 +541,23 @@ char *zstrdup(const char *s) {
 }
 
 size_t zmalloc_used_dram_memory(void) {
+#ifdef USE_MEMKIND_MEMTIER
+    return memtier_kind_allocated_size(dram_kind);
+#else
     size_t um;
     atomicGet(used_dram_memory,um);
     return um;
+#endif
 }
 
 size_t zmalloc_used_pmem_memory(void) {
+#ifdef USE_MEMKIND_MEMTIER
+    return memtier_kind_allocated_size(pmem_kind);
+#else
     size_t um;
     atomicGet(used_pmem_memory,um);
     return um;
+#endif
 }
 
 void zmalloc_set_oom_handler(void (*oom_handler)(size_t)) {
