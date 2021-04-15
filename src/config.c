@@ -2232,6 +2232,14 @@ static int updateStaticthreshold(long long val, long long prev, char **err) {
     return 1;
 }
 
+static int updateTiering(int val, int prev, char **err) {
+    UNUSED(prev);
+    UNUSED(err);
+    zmalloc_set_tiering(val);
+    
+    return 0;
+}
+
 static int updateMaxclients(long long val, long long prev, char **err) {
     /* Try to check if the OS is capable of supporting so many FDs. */
     if (val > prev) {
@@ -2339,6 +2347,7 @@ standardConfig configs[] = {
     createBoolConfig("cluster-allow-reads-when-down", NULL, MODIFIABLE_CONFIG, server.cluster_allow_reads_when_down, 0, NULL, NULL),
     createBoolConfig("oom-score-adj", NULL, MODIFIABLE_CONFIG, server.oom_score_adj, 0, NULL, updateOOMScoreAdj),
     createBoolConfig("hashtable-on-dram", NULL, IMMUTABLE_CONFIG, server.hashtable_on_dram, 1, NULL, NULL),
+    createBoolConfig("memkind-tiering", NULL, IMMUTABLE_CONFIG, server.use_memkind_tiering, 0, NULL, updateTiering),
 
 
     /* String Configs */

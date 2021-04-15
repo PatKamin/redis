@@ -205,6 +205,7 @@ static size_t used_dram_memory = 0;
 static size_t used_pmem_memory = 0;
 pthread_mutex_t used_dram_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t used_pmem_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int use_tiering = 0;
 
 static void zmalloc_default_oom(size_t size) {
     fprintf(stderr, "zmalloc: Out of memory trying to allocate %zu bytes\n",
@@ -216,7 +217,12 @@ static void zmalloc_default_oom(size_t size) {
 static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 
 void *zmalloc_dram(size_t size) {
-    void *ptr = malloc(size+PREFIX_SIZE);
+    void *ptr;
+    if (use_tiering) {
+        ptr = memtier_malloc(tiered_memory, size);
+    } else {
+        ptr = malloc(size+PREFIX_SIZE);
+    }
 #if defined(USE_MEMKIND) || defined(USE_MEMKIND_MEMTIER)
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #else
@@ -553,6 +559,10 @@ size_t zmalloc_get_threshold(void) {
 
 void zmalloc_set_threshold(size_t threshold) {
     pmem_threshold = threshold;
+}
+
+void zmalloc_set_tiering(int tiering) {
+    use_tiering = tiering;
 }
 
 void zmalloc_set_pmem_mode(void) {
