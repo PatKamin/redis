@@ -13,7 +13,7 @@ jobs:
       run: make BUILD_TLS=yes
     - name: test
       run: |
-        sudo apt-get install tcl8.5
+        sudo apt-get install tcl8.6
         ./runtest --verbose
     - name: module api test
       run: ./runtest-moduleapi --verbose
@@ -48,3 +48,46 @@ jobs:
     - name: make
       run: make MALLOC=libc
 
+  build-memkind-malloc:
+    runs-on: ${{ matrix.os }}
+    name: Building memkind daxctl ${{ matrix.daxctl }} | hwloc ${{ matrix.hwloc }} | ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04]
+        daxctl: [false, true]
+        hwloc: [false, true]
+        malloc: [memkind, memkind_memtier]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Initialize memkind repo
+      run: git submodule update --init
+
+    - name: Install basic dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install autoconf libnuma-dev
+
+    - name: Install daxctl dependency
+      run: |
+        if [ "${{ matrix.daxctl }}" == true ]; then
+          sudo apt install libdaxctl-dev
+        else
+          echo "Skipping daxctl installation"
+        fi
+
+    - name: Install hwloc dependency
+      run: |
+        if [ "${{ matrix.hwloc }}" == true ]; then
+          ./deps/memkind/utils/docker/docker_install_hwloc.sh
+        else
+          echo "Skipping hwloc installation"
+        fi
+
+    - name: Build memkeydb
+      run: |
+        make MALLOC=${{ matrix.malloc }}

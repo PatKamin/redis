@@ -84,9 +84,56 @@ void zlibc_free(void *ptr) {
 #define realloc_pmem(ptr,size) memkind_realloc(MEMKIND_DAX_KMEM,ptr,size)
 #define free_dram(ptr) memkind_free(MEMKIND_DEFAULT,ptr)
 #define free_pmem(ptr) memkind_free(MEMKIND_DAX_KMEM,ptr)
+#elif defined(USE_MEMKIND_MEMTIER)
+#include <errno.h>
+static struct memtier_memory *tiered_memory;
+static memkind_t dram_kind;
+static memkind_t pmem_kind;
+#define malloc(size) memtier_malloc(tiered_memory, size)
+#define calloc(count, size) memtier_calloc(tiered_memory, count, size)
+#define realloc_dram(ptr, size) memtier_kind_realloc(dram_kind, ptr, size)
+#define realloc_pmem(ptr, size) memtier_kind_realloc(pmem_kind, ptr, size)
+#define free_dram(ptr) memtier_kind_realloc(dram_kind, ptr, 0)
+#define free_pmem(ptr) memtier_kind_realloc(pmem_kind, ptr, 0)
 #endif
 
-#ifndef USE_MEMKIND
+#if defined(USE_MEMKIND_MEMTIER)
+void zmalloc_create_memtier(void) {
+    int ret;
+    struct memtier_builder *tiered_memory_builder;
+    dram_kind = MEMKIND_DEFAULT;
+    pmem_kind = MEMKIND_DAX_KMEM;
+
+    tiered_memory_builder = memtier_builder_new();
+    if (!tiered_memory_builder) {
+        abort();
+    }
+    ret = memtier_builder_add_tier(tiered_memory_builder, dram_kind, 1);
+    if (ret) {
+        abort();
+    }
+    ret = memtier_builder_add_tier(tiered_memory_builder, pmem_kind, 8);
+    if (ret) {
+        abort();
+    }
+    ret = memtier_builder_set_policy(tiered_memory_builder,
+                                     MEMTIER_POLICY_STATIC_THRESHOLD);
+    if (ret) {
+        abort();
+    }
+    tiered_memory = memtier_builder_construct_memtier_memory(tiered_memory_builder);
+    if (!tiered_memory) {
+        abort();
+    }
+    memtier_builder_delete(tiered_memory_builder);
+}
+#else
+void zmalloc_create_memtier(void) {
+    return;
+}
+#endif
+
+#if !defined(USE_MEMKIND) && !defined(USE_MEMKIND_MEMTIER)
 static void zmalloc_pmem_not_available(void) {
     fprintf(stderr, "zmalloc: PMEM function is available only for memkind allocator\n");
     fflush(stderr);
@@ -129,6 +176,7 @@ size_t zmalloc_used_memory(void) {
 }
 #endif
 
+#ifndef USE_MEMKIND_MEMTIER
 #define update_zmalloc_dram_stat_alloc(__n) do { \
     size_t _n = (__n); \
     if (_n&(sizeof(long)-1)) _n += sizeof(long)-(_n&(sizeof(long)-1)); \
@@ -153,12 +201,14 @@ size_t zmalloc_used_memory(void) {
     atomicDecr(used_pmem_memory,__n); \
 } while(0)
 
-static int memory_variant = MEMORY_ONLY_DRAM;
-static size_t pmem_threshold = UINT_MAX;
 static size_t used_dram_memory = 0;
 static size_t used_pmem_memory = 0;
 pthread_mutex_t used_dram_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t used_pmem_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+static int memory_variant = MEMORY_ONLY_DRAM;
+static size_t pmem_threshold = UINT_MAX;
 
 static void zmalloc_default_oom(size_t size) {
     fprintf(stderr, "zmalloc: Out of memory trying to allocate %zu bytes\n",
@@ -170,31 +220,41 @@ static void zmalloc_default_oom(size_t size) {
 static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 
 void *zmalloc_dram(size_t size) {
+#ifdef USE_MEMKIND_MEMTIER
+    void *ptr = memtier_kind_malloc(dram_kind, size+PREFIX_SIZE);
+#else
     void *ptr = malloc(size+PREFIX_SIZE);
-#ifdef USE_MEMKIND
+#endif
+#if defined(USE_MEMKIND) || defined(USE_MEMKIND_MEMTIER)
     if (!ptr && errno==ENOMEM) zmalloc_oom_handler(size);
 #else
     if (!ptr) zmalloc_oom_handler(size);
 #endif
 #ifdef HAVE_MALLOC_SIZE
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(zmalloc_size(ptr));
+#endif
     return ptr;
 #else
     *((size_t*)ptr) = size;
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(size+PREFIX_SIZE);
+#endif
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
 
-#ifdef USE_MEMKIND
+#if defined(USE_MEMKIND) || defined(USE_MEMKIND_MEMTIER)
+size_t zmalloc_used_memory(void) {
+    return zmalloc_used_dram_memory()+zmalloc_used_pmem_memory();
+}
+#endif
+
+#if defined(USE_MEMKIND)
 static int zmalloc_is_pmem(void * ptr) {
     if (memory_variant == MEMORY_ONLY_DRAM) return DRAM_LOCATION;
     struct memkind *temp_kind = memkind_detect_kind(ptr);
     return (temp_kind == MEMKIND_DEFAULT) ? DRAM_LOCATION : PMEM_LOCATION;
-}
-
-size_t zmalloc_used_memory(void) {
-    return zmalloc_used_dram_memory()+zmalloc_used_pmem_memory();
 }
 
 static void zfree_pmem(void *ptr) {
@@ -274,10 +334,15 @@ static void *zrealloc_pmem(void *ptr, size_t size) {
     return (char*)newptr+PREFIX_SIZE;
 #endif
 }
+
 #endif
 
 void *zmalloc(size_t size) {
+#ifdef USE_MEMKIND_MEMTIER
+    return malloc(size);
+#else
     return (size < pmem_threshold) ? zmalloc_dram(size) : zmalloc_pmem(size);
+#endif
 }
 
 /* Allocation and free functions that bypass the thread cache
@@ -299,56 +364,86 @@ void zfree_no_tcache(void *ptr) {
 #endif
 
 void *zcalloc_dram(size_t size) {
+#ifdef USE_MEMKIND_MEMTIER
+    void *ptr = memtier_kind_calloc(dram_kind, 1, size+PREFIX_SIZE);
+#else
     void *ptr = calloc(1, size+PREFIX_SIZE);
+#endif
 
     if (!ptr) zmalloc_oom_handler(size);
+
 #ifdef HAVE_MALLOC_SIZE
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(zmalloc_size(ptr));
+#endif
     return ptr;
 #else
     *((size_t*)ptr) = size;
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_alloc(size+PREFIX_SIZE);
+#endif
     return (char*)ptr+PREFIX_SIZE;
 #endif
 }
 
 void *zcalloc(size_t size) {
+#ifdef USE_MEMKIND_MEMTIER
+    return calloc(1, size);
+#else
     return (size < pmem_threshold) ? zcalloc_dram(size) : zcalloc_pmem(size);
+#endif
 }
 
 void *zrealloc_dram(void *ptr, size_t size) {
 #ifndef HAVE_MALLOC_SIZE
     void *realptr;
 #endif
+#ifndef USE_MEMKIND_MEMTIER
     size_t oldsize;
+#endif
     void *newptr;
 
     if (size == 0 && ptr != NULL) {
         zfree_dram(ptr);
         return NULL;
     }
-    if (ptr == NULL) return zmalloc(size);
+    if (ptr == NULL) return zmalloc_dram(size);
 #ifdef HAVE_MALLOC_SIZE
+#ifndef USE_MEMKIND_MEMTIER
     oldsize = zmalloc_size(ptr);
+#endif
     newptr = realloc_dram(ptr,size);
     if (!newptr) zmalloc_oom_handler(size);
 
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_free(oldsize);
     update_zmalloc_dram_stat_alloc(zmalloc_size(newptr));
+#endif
+
     return newptr;
 #else
     realptr = (char*)ptr-PREFIX_SIZE;
+#ifndef USE_MEMKIND_MEMTIER
     oldsize = *((size_t*)realptr);
+#endif
     newptr = realloc_dram(realptr,size+PREFIX_SIZE);
     if (!newptr) zmalloc_oom_handler(size);
 
     *((size_t*)newptr) = size;
+
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_free(oldsize+PREFIX_SIZE);
     update_zmalloc_dram_stat_alloc(size+PREFIX_SIZE);
+#endif
     return (char*)newptr+PREFIX_SIZE;
 #endif
 }
 
+#ifdef USE_MEMKIND_MEMTIER
+void *zrealloc(void *ptr, size_t size) {
+    return memtier_realloc(tiered_memory, ptr, size);
+}
+#else
 void *zrealloc(void *ptr, size_t size) {
     if (!zmalloc_is_pmem(ptr)) {
         return zrealloc_dram(ptr, size);
@@ -356,6 +451,7 @@ void *zrealloc(void *ptr, size_t size) {
         return zrealloc_pmem(ptr, size);
     }
 }
+#endif
 
 /* Provide zmalloc_size() for systems where this function is not provided by
  * malloc itself, given that in that case we store a header with this
@@ -374,21 +470,32 @@ size_t zmalloc_usable(void *ptr) {
 void zfree_dram(void *ptr) {
 #ifndef HAVE_MALLOC_SIZE
     void *realptr;
+#ifndef USE_MEMKIND_MEMTIER
     size_t oldsize;
+#endif
 #endif
 
     if (ptr == NULL) return;
 #ifdef HAVE_MALLOC_SIZE
+#ifndef USE_MEMKIND_MEMTIER
     update_zmalloc_dram_stat_free(zmalloc_size(ptr));
+#endif
     free_dram(ptr);
 #else
     realptr = (char*)ptr-PREFIX_SIZE;
+#ifndef USE_MEMKIND_MEMTIER
     oldsize = *((size_t*)realptr);
     update_zmalloc_dram_stat_free(oldsize+PREFIX_SIZE);
+#endif
     free_dram(realptr);
 #endif
 }
 
+#ifdef USE_MEMKIND_MEMTIER
+void zfree(void *ptr) {
+    memtier_free(ptr);
+}
+#else
 void zfree(void *ptr) {
     if (!zmalloc_is_pmem(ptr)) {
         zfree_dram(ptr);
@@ -396,6 +503,7 @@ void zfree(void *ptr) {
         zfree_pmem(ptr);
     }
 }
+#endif
 
 char *zstrdup(const char *s) {
     size_t l = strlen(s)+1;
@@ -406,15 +514,23 @@ char *zstrdup(const char *s) {
 }
 
 size_t zmalloc_used_dram_memory(void) {
+#ifdef USE_MEMKIND_MEMTIER
+    return memtier_kind_allocated_size(dram_kind);
+#else
     size_t um;
     atomicGet(used_dram_memory,um);
     return um;
+#endif
 }
 
 size_t zmalloc_used_pmem_memory(void) {
+#ifdef USE_MEMKIND_MEMTIER
+    return memtier_kind_allocated_size(pmem_kind);
+#else
     size_t um;
     atomicGet(used_pmem_memory,um);
     return um;
+#endif
 }
 
 void zmalloc_set_oom_handler(void (*oom_handler)(size_t)) {
@@ -595,7 +711,7 @@ int jemalloc_purge() {
     return -1;
 }
 
-#elif defined(USE_MEMKIND)
+#elif defined(USE_MEMKIND) || defined(USE_MEMKIND_MEMTIER)
 int zmalloc_get_allocator_info(size_t *allocated,
                                size_t *active,
                                size_t *resident) {
